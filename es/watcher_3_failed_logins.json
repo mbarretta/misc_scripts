@@ -1,0 +1,102 @@
+{
+  "trigger": {
+    "schedule": {
+      "interval": "1m"
+    }
+  },
+  "input": {
+    "search": {
+      "request": {
+        "search_type": "query_then_fetch",
+        "indices": [
+          ".security_audit_log*"
+        ],
+        "types": [],
+        "body": {
+          "size": 0,
+          "query": {
+            "bool": {
+              "must": [
+                {
+                  "match_phrase": {
+                    "event_type": "authentication_failed"
+                  }
+                },
+                {
+                  "range": {
+                    "@timestamp": {
+                      "gte": "now-65s"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "aggs": {
+            "last_chunk": {
+              "date_histogram": {
+                "field": "@timestamp",
+                "interval": "1m",
+                "min_doc_count": 3
+              },
+              "aggs": {
+                "users": {
+                  "terms": {
+                    "field": "principal"
+                  },
+                  "aggs": {
+                    "last": {
+                      "top_hits": {
+                        "size": 1,
+                        "sort": [
+                          {
+                            "@timestamp": {
+                              "order": "desc"
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "condition": {
+    "compare": {
+      "ctx.payload.hits.total": {
+        "gte": 1
+      }
+    }
+  },
+  "actions": {
+    "my-logging-action": {
+      "logging": {
+        "level": "info",
+        "text": "There are {{ctx.payload.total}} login alerts in the last minute. Principals: {{#toJson}}ctx.payload.principals{{/toJson}}"
+      }
+    },
+    "cybersponse": {
+      "webhook": {
+        "scheme": "http",
+        "host": "mylisteningserver",
+        "port": 9200,
+        "method": "post",
+        "path": "/elastic",
+        "params": {},
+        "headers": {},
+        "body": "{ \"{{ctx.watch_id}}\": { \"total\": {{ctx.payload.total}}, \"failures\": {{#toJson}}ctx.payload.results{{/toJson}} } }"
+      }
+    }
+  },
+  "transform": {
+    "script": {
+      "source": "def results = new ArrayList();def principals = ctx.payload.aggregations.last_chunk.buckets[0].users.buckets.collect(u -> u.key); def buckets = ctx.payload.aggregations.last_chunk.buckets[0].users.buckets.iterator();while (buckets.hasNext()) { def bucket = buckets.next(); def map=new HashMap(); map.put('principal',bucket.key);map.put('failure_count',bucket.doc_count);map.put('last_failure',bucket.last.hits.hits[0]); results.add(map);} return ['results': results, 'total':principals.size(), 'principals':principals]",
+      "lang": "painless"
+    }
+  }
+}

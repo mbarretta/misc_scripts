@@ -1,0 +1,198 @@
+{
+  $schema: https://vega.github.io/schema/vega/v3.3.json
+  config: {
+    kibana: {tooltips: false}
+  }
+  data: [
+    {
+      name: table
+      url: {
+        %context%: true
+        %timefield%: timestamp
+ 
+      // Which index to search
+        index: kibana_sample_data_flights
+        body: {
+          aggs: {
+            time_buckets: {
+              date_histogram: {
+                field: timestamp
+                interval: {%autointerval%: true}
+                //"1d"
+
+                extended_bounds: {
+                  min: {%timefilter%: "min"}
+                  max: {%timefilter%: "max"}
+                }
+                min_doc_count: 0
+              }
+              aggs: {
+                stats: {
+                  extended_stats: {
+                  field: "DistanceMiles",
+                  sigma: 1}
+                }
+              }
+            }
+          }
+          size: 0
+        }
+      }
+      format: {
+        property: aggregations.time_buckets.buckets
+      }
+    }
+  ]
+  scales: [
+    {
+      name: xscale
+      type: time
+      domain: {data: "table", field: "key"}
+      range: width
+      padding: {signal: "barWidth"}
+    }
+    {
+      name: yscale
+      domain: {data: "table", field: "stats.max"}
+      nice: true
+      range: height
+      domainMin: 0
+    }
+  ]
+  axes: [
+    {orient: "bottom", scale: "xscale"}
+    {orient: "left", scale: "yscale"}
+  ]
+  signals: [
+    {
+      name: barWidth
+      update: width / ( data('table').length + 2 ) * 0.80
+    }
+    {
+      name: strokeWidth
+      update: max(1, barWidth / 9.5)
+    }
+  ]
+  marks: [
+    {
+      name: max_min_line
+      type: rule
+      clip: true
+      interactive: false
+      from: {data: "table"}
+      encode: {
+        update: {
+          x: {scale: "xscale", field: "key"}
+          y: {scale: "yscale", field: "stats.max"}
+          x2: {scale: "xscale", field: "key"}
+          y2: {scale: "yscale", field: "stats.min"}
+          stroke: {value: "black"}
+          strokeWidth: {signal: "strokeWidth"}
+        }
+      }
+    }
+    {
+      name: min_ticks
+      type: rule
+      clip: true
+      interactive: false
+      from: {data: "table"}
+      encode: {
+        update: {
+          x: {
+            signal: scale('xscale', datum.key)-barWidth / 2
+          }
+          x2: {
+            signal: scale('xscale', datum.key)+barWidth / 2
+          }
+          y: {scale: "yscale", field: "stats.min"}
+          y2: {scale: "yscale", field: "stats.min"}
+          stroke: {value: "black"}
+          strokeWidth: {signal: "strokeWidth"}
+          opacity: {signal: "datum.stats.avg > 0 ? 1 : 0"}
+        }
+      }
+    }
+    {
+      name: max_tick
+      type: rule
+      clip: true
+      interactive: false
+      from: {data: "table"}
+      encode: {
+        update: {
+          x: {
+            signal: scale('xscale', datum.key)-barWidth / 2
+          }
+          x2: {
+            signal: scale('xscale', datum.key)+barWidth / 2
+          }
+          y: {scale: "yscale", field: "stats.max"}
+          y2: {scale: "yscale", field: "stats.max"}
+          stroke: {value: "black"}
+          strokeWidth: {signal: "strokeWidth"}
+        }
+      }
+    }
+    {
+      name: avg_diamond
+      type: symbol
+      interactive: false
+      from: {data: "table"}
+      encode: {
+        update: {
+          x: {scale: "xscale", field: "key"}
+          y: {scale: "yscale", field: "stats.avg"}
+          fill: {value: "black"}
+          shape: {value: "diamond"}
+          size: {signal: "barWidth*barWidth"}
+          fillOpacity: {signal: "datum.stats.avg > 0 ? 1 : 0"}
+        }
+      }
+    }
+    {
+      name: stddev_bar
+      type: rect
+      clip: true
+      interactive: false
+      from: {data: "table"}
+      encode: {
+        update: {
+          x: {
+            signal: scale('xscale', datum.key) - barWidth / 2
+          }
+          width: {signal: "barWidth"}
+          y: {
+            scale: yscale
+            field: stats.std_deviation_bounds.lower
+          }
+          y2: {
+            scale: yscale
+            field: stats.std_deviation_bounds.upper
+          }
+          fillOpacity: {value: 0.5}
+        }
+      }
+    }
+    {
+      name: tooltip_transparent_overlay
+      type: rect
+      clip: true
+      from: {data: "table"}
+      encode: {
+        update: {
+          x: {
+            signal: scale('xscale', datum.key) - barWidth / 2
+          }
+          width: {signal: "barWidth"}
+          y: {scale: "yscale", field: "stats.max"}
+          y2: {scale: "yscale", field: "stats.min"}
+          fillOpacity: {value: 0}
+          tooltip: {
+            signal: "{ 'date': month(datum.key)+1 + '/' + date(datum.key) + '/'+year(datum.key), 'average': format(datum.stats.avg, ',.2f'), 'maximum': format(datum.stats.max, ',.2f'), 'minimum': format(datum.stats.min, ',.2f'), '1 sigma lower bounds': format(datum.stats.std_deviation_bounds.lower, ',.2f'), '1 sigma upper bounds': format(datum.stats.std_deviation_bounds.upper, ',.2f')}"
+          }
+        }
+      }
+    }
+  ]
+}
